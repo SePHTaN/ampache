@@ -791,9 +791,17 @@ class Catalog_local extends Catalog
         );
         $vainfo->get_info();
 
+        // REMOVE_ME only for testing remove when done
+        //debug_event(self::class, 'Tags gathered : ' . var_export($vainfo->tags, true), 5);
+        //debug_event('Insert_Local_Songs', 'Call : Get_Tag_Type', 5);
         $key = VaInfo::get_tag_type($vainfo->tags);
+        // REMOVE_ME only for testing remove when done
+        //debug_event('Insert_Local_Songs', 'Available Tag_types : ' . var_export($key, true), 5);
 
+        //debug_event('Insert_Local_Songs', 'Call : Clean_Tag_Info with Tag_Types ' . var_export($key, true), 5);
         $results            = VaInfo::clean_tag_info($vainfo->tags, $key, $file);
+        // REMOVE_ME only for testing remove when done
+        //debug_event(self::class, 'Final Tags gathered : ' . var_export($results, true), 5);
         $results['catalog'] = $this->id;
 
         if (isset($options['user_upload'])) {
@@ -807,6 +815,7 @@ class Catalog_local extends Catalog
         if ((int)$options['artist_id'] > 0) {
             $results['artist_id']      = $options['artist_id'];
             $results['albumartist_id'] = $options['artist_id'];
+            debug_event('Catalog_Local', 'Create new Artist', 5);
             $artist                    = new Artist($results['artist_id']);
             if ($artist->id) {
                 $results['artist'] = $artist->name;
@@ -815,6 +824,7 @@ class Catalog_local extends Catalog
 
         if ((int)$options['album_id'] > 0) {
             $results['album_id'] = $options['album_id'];
+            debug_event('Catalog_Local', 'Create new Album', 5);
             $album               = new Album($results['album_id']);
             if ($album->id) {
                 $results['album'] = $album->name;
@@ -823,6 +833,7 @@ class Catalog_local extends Catalog
 
         if (count($this->get_gather_types('music')) > 0) {
             if (AmpConfig::get('catalog_check_duplicate')) {
+                // MA_FEATURE only skip insert_song duplicate if artist is the same
                 if (Song::find($results)) {
                     debug_event('local.catalog', 'skipping_duplicate ' . $file, 5);
 
@@ -862,33 +873,60 @@ class Catalog_local extends Catalog
             }
         }
 
-        $song_id = Song::insert($results);
-        if ($song_id) {
-            // If song rating tag exists and is well formed (array user=>rating), add it
-            if (array_key_exists('rating', $results) && is_array($results['rating'])) {
-                // For each user's ratings, call the function
-                foreach ($results['rating'] as $user => $rating) {
-                    debug_event('local.catalog', "Setting rating for Song $song_id to $rating for user $user", 5);
-                    $o_rating = new Rating($song_id, 'song');
-                    $o_rating->set_rating($rating, $user);
+        // REMOVE_ME song_id will be an array of added songs
+        // loop over this array
+        $ma_song_id = Song::insert($results);
+        // REMOVE_ME
+        debug_event('Catalog_local', ' After ADD Song - Returned song_id : ' . var_export($ma_song_id, true),5 );
+        //$song_id = Song::insert($results);
+        //if ($song_id) {
+        if ($ma_song_id) {
+            $idCount = (is_countable($ma_song_id)) ? count($ma_song_id) : 1;
+            for ($i = 0; $i < $idCount; $i++) {
+                $tmp_song_id = (is_array($ma_song_id)) ? $ma_song_id[$i] : $ma_song_id;
+                // REMOVE_ME
+                debug_event('Catalog_local', ' Loop : ' .  var_export($i, true) . ' Processing song_id : ' . var_export($tmp_song_id, true),5 );
+                // If song rating tag exists and is well formed (array user=>rating), add it
+                if (array_key_exists('rating', $results) && is_array($results['rating'])) {
+                    // For each user's ratings, call the function
+                    foreach ($results['rating'] as $user => $rating) {
+                        // REMOVE_ME
+                        //debug_event('local.catalog', "Setting rating for Song $tmp_song_id to $rating for user $user", 5);
+                        //debug_event('local.catalog', "Setting rating for Song $song_id to $rating for user $user", 5);
+                        $o_rating = new Rating($tmp_song_id, 'song');
+                        //$o_rating = new Rating($song_id, 'song');
+                        $o_rating->set_rating($rating, $user);
+                    }
                 }
-            }
-            // Extended metadata loading is not deferred, retrieve it now
-            if (!AmpConfig::get('deferred_ext_metadata')) {
-                $song = new Song($song_id);
-                Recommendation::get_artist_info($song->artist);
-            }
-            if (Song::isCustomMetadataEnabled()) {
-                $song    = new Song($song_id);
-                $results = array_diff_key($results, array_flip($song->getDisabledMetadataFields()));
-                self::add_metadata($song, $results);
-            }
-            $this->songs_to_gather[] = $song_id;
+                // Extended metadata loading is not deferred, retrieve it now
+                if (!AmpConfig::get('deferred_ext_metadata')) {
+                    $song = new Song($tmp_song_id);
+                    //$song = new Song($song_id);
+                    // REMOVE_ME
+                    //debug_event('Catalog_local', ' Get-Recommendation for Song : ' . var_export($song, true),5 );
+                    Recommendation::get_artist_info($song->artist);
+                }
+                if (Song::isCustomMetadataEnabled()) {
+                    $song    = new Song($tmp_song_id);
+                    //$song    = new Song($song_id);
+                    // REMOVE_ME
+                    //debug_event('Catalog_local', ' isCustomMetaDataEnabled for Song : ' . var_export($song, true),5 );
+                    $results = array_diff_key($results, array_flip($song->getDisabledMetadataFields()));
+                    // REMOVE_ME
+                    //debug_event('Catalog_local', ' Metadata Results for Song : ' . var_export($results, true),5 );
+                    self::add_metadata($song, $results);
+                }
+                $this->songs_to_gather[] = $tmp_song_id;
+                //$this->songs_to_gather[] = $song_id;
 
-            $this->_filecache[strtolower($file)] = $song_id;
+                $this->_filecache[strtolower($file)] = $tmp_song_id;
+                //$this->_filecache[strtolower($file)] = $song_id;
+            }
         }
 
-        return $song_id;
+        // REMOVE_ME this has to changed it's not OK to pass only first item
+        //return $song_id;
+        return $ma_song_id[0];
     }
 
     /**

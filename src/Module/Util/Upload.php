@@ -207,7 +207,8 @@ class Upload
     {
         debug_event(self::class, 'check_artist: looking for ' . $artist_name, 5);
         if ($artist_name !== '') {
-            $artist_id = Artist::check($artist_name, null, true);
+            // extend with $primary = null name should always give an unique id
+            $artist_id = Artist::check($artist_name, null, null, true);
             if ($artist_id !== null && !Access::check('interface', 50)) {
                 debug_event(self::class, 'An artist with the same name already exists, uploaded song skipped.', 3);
 

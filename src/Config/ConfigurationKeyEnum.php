@@ -120,4 +120,7 @@ final class ConfigurationKeyEnum
     public const METADATA_ORDER                = 'metadata_order';
     public const METADATA_ORDER_VIDEO          = 'metadata_order_video';
     public const GETID3_TAG_ORDER              = 'getid3_tag_order';
+    public const ENABLE_MULTIARTIST            = 'enable_multiartist';
+    public const ENABLE_ALIASES                = 'enable_aliases';
+    public const GROUP_ALIASES                 = 'group_aliases';
 }

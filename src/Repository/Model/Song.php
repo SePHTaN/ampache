@@ -210,6 +210,14 @@ class Song extends database_object implements Media, library_item, GarbageCollec
      */
     public $r128_track_gain;
     /**
+     * @var string|null $joinphrase
+     */
+    public $joinphrase;
+    /**
+     * @var integer|null $joinorder
+     */
+    public $joinorder;
+    /**
      * @var string $f_title
      */
     public $f_title;
@@ -408,13 +416,21 @@ class Song extends database_object implements Media, library_item, GarbageCollec
         if ($check_file > 0) {
             return $check_file;
         }
+        // REMOVE_ME only for testing remove when done
+        debug_event(self::class, 'Angelieferte Tags :', 5);
         $catalog          = $results['catalog'];
         $file             = $results['file'];
         $title            = Catalog::check_length(Catalog::check_title($results['title'], $file));
         $artist           = Catalog::check_length($results['artist']);
+        // REMOVE_ME circumvent not callable Catalog::check_length by capsulating insert trough insert_action looping over insert --> only one artist
+        $artists          = array_map(array('Ampache\Repository\Model\Catalog','check_length'), $results['artists']);       // for MA
+        $joinphrase       = $results['joinphrase'] ?: null;                                                                 // for MA
+        $primary          = $results['primary'];                                                                            // for MA
         $album            = Catalog::check_length($results['album']);
-        $albumartist      = Catalog::check_length($results['albumartist'] ?: $results['band']);
+        //$albumartist      = Catalog::check_length($results['albumartist'] ?: $results['band']);
+        $albumartist      = array_map(array('Ampache\Repository\Model\Catalog','check_length'), $results['albumartist']);   // for MA
         $albumartist      = $albumartist ?: null;
+        $aa_joinphrase    = $results['aa_joinphrase'] ?: null;                                                              // for MA
         $bitrate          = $results['bitrate'] ?: 0;
         $rate             = $results['rate'] ?: 0;
         $mode             = $results['mode'];
@@ -425,8 +441,8 @@ class Song extends database_object implements Media, library_item, GarbageCollec
         $track_mbid       = $track_mbid ?: null;
         $album_mbid       = $results['mb_albumid'];
         $album_mbid_group = $results['mb_albumid_group'];
-        $artist_mbid      = $results['mb_artistid'];
-        $albumartist_mbid = $results['mb_albumartistid'];
+        $artist_mbid      = $results['mb_artistid'];                                                                        // multiple artist support makes this an array
+        $albumartist_mbid = $results['mb_albumartistid'];                                                                   // multiple artist support makes this an array (not yet implemented)
         $disk             = (Album::sanitize_disk($results['disk']) > 0) ? Album::sanitize_disk($results['disk']) : 1;
         $year             = Catalog::normalize_year($results['year'] ?: 0);
         $comment          = $results['comment'];
@@ -452,8 +468,7 @@ class Song extends database_object implements Media, library_item, GarbageCollec
             $license = null;
         }
 
-        $catalog_number = isset($results['catalog_number']) ? Catalog::check_length($results['catalog_number'],
-            64) : null;
+        $catalog_number        = isset($results['catalog_number']) ? Catalog::check_length($results['catalog_number'], 64) : null;
         $language              = isset($results['language']) ? Catalog::check_length($results['language'], 128) : null;
         $channels              = $results['channels'] ?: 0;
         $release_type          = isset($results['release_type']) ? Catalog::check_length($results['release_type'], 32) : null;
@@ -467,91 +482,185 @@ class Song extends database_object implements Media, library_item, GarbageCollec
         $original_year         = Catalog::normalize_year($results['original_year'] ?: 0);
         $barcode               = Catalog::check_length($results['barcode'], 64);
 
+        debug_event(self::class, 'Artists-Tag : ' . var_export($artists, true), 5);
+        debug_event(self::class, 'Artists-MBID-Tag : ' . var_export($artist_mbid, true), 5);
+        debug_event(self::class, 'Artists-Joinphrase-Tag : ' . var_export($joinphrase, true), 5);
+        debug_event(self::class, 'Primary-Tag : ' . var_export($primary, true), 5);
+        debug_event(self::class, 'AlbumArtist-Tag : ' . var_export($albumartist, true), 5);
+        debug_event(self::class, 'AlbumArtist-Tag Source: ' . var_export($results['albumartist'], true), 5);
+        debug_event(self::class, 'Band-Tag Source: ' . var_export($results['band'], true), 5);
+        debug_event(self::class, 'AlbumArtist-MBID-Tag : ' . var_export($albumartist_mbid, true), 5);
+
         if (!in_array($mode, ['vbr', 'cbr', 'abr'])) {
             debug_event(self::class, 'Error analyzing: ' . $file . ' unknown file bitrate mode: ' . $mode, 2);
             $mode = null;
         }
         if (!isset($results['albumartist_id'])) {
             $albumartist_id = null;
-            if ($albumartist) {
-                // Multiple artist per songs not supported for now
-                $albumartist_mbid = Catalog::trim_slashed_list($albumartist_mbid);
-                $albumartist_id   = Artist::check($albumartist, $albumartist_mbid);
+            // there might be more than one albumartist
+            $albumArtistCount     = is_countable($albumartist)      ? count($albumartist)      : (isset($albumartist)      ? 1 : NULL);
+            $albumArtistMbidCount = is_countable($albumartist_mbid) ? count($albumartist_mbid) : (isset($albumartist_mbid) ? 1 : NULL);
+            if ($albumArtistCount <> $albumArtistMbidCount) {
+                debug_event(self::class, 'For Multi-Artist : Count AlbumArtist must match Count AlbumArtist_MBID !', 5);
+                debug_event(self::class, 'For the moment discard the excess tag. Fix needed to get the missing ArtistName or ArtistMBID !', 5);
+                if ($albumArtistMbidCount > $albumArtistCount) {
+                    $albumArtistMbidCount = $albumArtistCount;
+                } else {
+                    $albumArtistCount = $albumArtistMbidCount;
+                }
+            }
+            //if ($albumartist) {
+            if ($albumArtistCount) {
+                // loop over all albumartists and add as artist in case it is new
+                for ($i = 0; $i < $albumArtistCount; $i ++) {
+                    // Multiple artist per songs not supported for now
+                    // REMOVE_ME for moment pass the array for testing
+                    //$albumartist_mbid = Catalog::trim_slashed_list($albumartist_mbid);
+                    debug_event('Song::insert', ' Calling Artist::check for AlbumArtist : ' . var_export($albumartist, true) . ' -- with MBID : ' . var_export($albumartist_mbid, true), 5);
+                    $albumartist_id[]   = (int) Artist::check($albumartist, $albumartist_mbid, $primary);
+                }
             }
         } else {
             $albumartist_id = (int)($results['albumartist_id']);
         }
+        debug_event('Song::insert', ' Added AlbumsArtists with ID : ' . var_export($albumartist_id, true), 5);
+
         if (!isset($results['artist_id'])) {
+            // there might be more than one artist
+            $artistCount     = is_countable($artists)     ? count($artists)     : (isset($artists)     ? 1 : NULL);
+            $artistMbidCount = is_countable($artist_mbid) ? count($artist_mbid) : (isset($artist_mbid) ? 1 : NULL);
+            if ($artistCount <> $artistMbidCount) {
+                debug_event(self::class, 'For Multi-Artist : Count Artist must match Count Artist_MBID !', 5);
+                debug_event(self::class, 'For the moment discard the excess tag. Fix needed to get the missing ArtistName or Artist_MBID !', 5);
+                if ($artistMbidCount > $artistCount) {
+                    $artistMbidCount = $artistCount;
+                } else {
+                    $artistCount = $artistMbidCount;
+                }
+            }
             // Multiple artist per songs not supported for now
-            $artist_mbid = Catalog::trim_slashed_list($artist_mbid);
-            $artist_id   = Artist::check($artist, $artist_mbid);
+            // REMOVE_ME for moment pass the array for testing
+            //$artist_mbid = Catalog::trim_slashed_list($artist_mbid);
+            if ($artistCount) {
+                // loop over all albumartists and add as artist in case it is new
+                for ($i = 0; $i < $artistCount; $i ++) {
+                    debug_event('Song::insert', ' Calling Artist::check for Artist : ' . var_export($artists, true) . ' -- with MBID : ' . var_export($artist_mbid, true), 5);
+                    $artist_id[] = Artist::check($artists, $artist_mbid, $primary);
+                }
+            }
         } else {
             $artist_id = (int)($results['artist_id']);
         }
+        debug_event('Song::insert', ' Added Artists with ID : ' . var_export($artist_id, true), 5);
+
+        // MultiArtist : add table album_artist with id, album_id, artist_id, strArtist, joinphrase, joinorder
+        // add artists to this table add album_artist.id to album table field album_artist
+        // for the old behavier add only first albumartist to the table album
+        $albumartistIdCount = (is_countable($albumartist_id)) ? count($albumartist_id) : 1;
+
+        // REMOVE_ME if multiple albumartists got added add the album for each albumartist
         if (!isset($results['album_id'])) {
-            $album_id = Album::check($catalog, $album, $year, $disk, $album_mbid, $album_mbid_group, $albumartist_id, $release_type, $release_status, $original_year, $barcode, $catalog_number);
+            for ($i = 0; $i < $albumartistIdCount; $i++) {
+                $album_id[] = Album::check($catalog, $album, $year, $disk, $album_mbid, $album_mbid_group, $albumartist_id[$i], $release_type, $release_status, $original_year, $barcode, $catalog_number);
+                debug_event('Song::insert', ' Album::check - Added Album-ID :' . var_export($album_id[$i], true) . ' for AlbumArtist-ID : ' . var_export($albumartist_id[$i], true), 5);
+            }
         } else {
             $album_id = (int)($results['album_id']);
         }
+        // REMOVE_ME check wether all albums for all albumartists got added
+        debug_event('Song::insert', ' Albums added with ID : ' . var_export($album_id,true) . ' for AlbumArtists : ' . var_export($albumartist_id,true),5);
         $insert_time = time();
 
-        $sql = "INSERT INTO `song` (`catalog`, `file`, `album`, `artist`, `title`, `bitrate`, `rate`, `mode`, `size`, `time`, `track`, `addition_time`, `update_time`, `year`, `mbid`, `user_upload`, `license`, `composer`, `channels`) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        // REMOVE_ME begin of loop logic for adding same song for each artist AND albumartist !
+        // loop over $albumartists_count albumartists
+        // loop over $artistcount artists
+        $albumCount  = (is_countable($album_id))  ? count($album_id)  : 1;
+        $artistCount = (is_countable($artist_id)) ? count($artist_id) : 1;
+        debug_event('Song::insert', 'Insert Songs for : ' . $albumCount . ' Album(s) with album_id(s) : ' . var_export($album_id, true), 5);
+        debug_event('Song::insert', 'Insert Songs for : ' . $artistCount . ' Artist(s) with artist_id(s) : ' . var_export($artist_id, true), 5);
 
-        $db_results = Dba::write($sql, array(
-            $catalog,
-            $file,
-            $album_id,
-            $artist_id,
-            $title,
-            $bitrate,
-            $rate,
-            $mode,
-            $size,
-            $time,
-            $track,
-            $insert_time,
-            $insert_time,
-            $year,
-            $track_mbid,
-            $user_upload,
-            $license,
-            $composer,
-            $channels
-        ));
+        for ($i = 0; $i < $albumCount; $i++) {
+            // loop at least over the one artist
+            // REMOVE_ME
+            // FIX_ME this looks wrong and isn't optimal, dirty hack for multiple album artists
+            //if (is_countable($album_id)) {
+            //    $tmp_album_id = $album_id[0];
+            //}
+            // REMOVE_ME loop over artist_id's for adding same song for each artist
+            for ($joinorder = 0; $joinorder < $artistCount; $joinorder++) {
+                $tmpAlbumid  = (is_array($album_id)) ? (int)$album_id[$i] : (int)$album_id; // fix album_id must be int
+                $tmpArtistid = (is_array($artist_id)) ? (int)$artist_id[$joinorder] : (int)$artist_id; // fix artist_id must be int
+                debug_event('Song::insert', 'Insert Song - Nr. : ' . $joinorder . ' into Album : ' . $tmpAlbumid . ' for artist_id : ' . $tmpArtistid, 5);
 
-        if (!$db_results) {
-            debug_event(self::class, 'Unable to insert ' . $file, 2);
+                $sql = "INSERT INTO `song` (`catalog`, `file`, `album`, `artist`, `title`, `bitrate`, `rate`, `mode`, `size`, `time`, `track`, `addition_time`, `update_time`, `year`, `mbid`, `user_upload`, `license`, `composer`, `channels`) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-            return false;
-        }
+                $db_results = Dba::write($sql, array(
+                    $catalog,
+                    $file,
+                    $tmpAlbumid,
+                    $tmpArtistid,
+                    $title,
+                    $bitrate,
+                    $rate,
+                    $mode,
+                    $size,
+                    $time,
+                    $track,
+                    $insert_time,
+                    $insert_time,
+                    $year,
+                    $track_mbid,
+                    $user_upload,
+                    $license,
+                    $composer,
+                    $channels
+                ));
 
-        $song_id = (int)Dba::insert_id();
+                if (!$db_results) {
+                    debug_event(self::class, 'Unable to insert ' . $file, 2);
 
-        Catalog::update_map((int)$catalog, 'song', $song_id);
-
-        if ($user_upload) {
-            static::getUserActivityPoster()->post((int) $user_upload, 'upload', 'song', (int) $song_id, time());
-        }
-
-        // Allow scripts to populate new tags when injecting user uploads
-        if (!defined('NO_SESSION')) {
-            if ($user_upload && !Access::check('interface', 50, $user_upload)) {
-                $tags = Tag::clean_to_existing($tags);
-            }
-        }
-        if (is_array($tags)) {
-            foreach ($tags as $tag) {
-                $tag = trim((string)$tag);
-                if (!empty($tag)) {
-                    Tag::add('song', $song_id, $tag, false);
-                    Tag::add('album', $album_id, $tag, false);
-                    Tag::add('artist', $artist_id, $tag, false);
+                    return false;
                 }
-            }
-        }
 
-        $sql = "INSERT INTO `song_data` (`song_id`, `comment`, `lyrics`, `label`, `language`, `replaygain_track_gain`, `replaygain_track_peak`, `replaygain_album_gain`, `replaygain_album_peak`, `r128_track_gain`, `r128_album_gain`) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        Dba::write($sql, array($song_id, $comment, $lyrics, $label, $language, $replaygain_track_gain, $replaygain_track_peak, $replaygain_album_gain, $replaygain_album_peak, $r128_track_gain, $r128_album_gain));
+                // REMOVE_ME make song_id an array of the added songs
+                $song_id[$joinorder] = (int)Dba::insert_id();
+                debug_event('Song::insert', 'Got Song_id : ' . $song_id[$joinorder], 5);
+                //$song_id = (int)Dba::insert_id();
+
+                Catalog::update_map((int)$catalog, 'song', $song_id[$joinorder]);
+
+                if ($user_upload) {
+                    static::getUserActivityPoster()->post((int) $user_upload, 'upload', 'song', (int) $song_id[$joinorder], time());
+                }
+
+                // Allow scripts to populate new tags when injecting user uploads
+                if (!defined('NO_SESSION')) {
+                    if ($user_upload && !Access::check('interface', 50, $user_upload)) {
+                    $tags = Tag::clean_to_existing($tags);
+                    }
+                }
+                if (is_array($tags)) {
+                    foreach ($tags as $tag) {
+                        $tag = trim((string)$tag);
+                        if (!empty($tag)) {
+                            // REMOVE_ME pass the correct song_id and artist_id
+                            Tag::add('song', $song_id[$joinorder], $tag, false);       // X Artisten verursachen X songs
+                            //Tag::add('song', $song_id, $tag, false);       // X Artisten verursachen X songs
+                            Tag::add('album', $album_id, $tag, false);     // songs gehören immer zu EINEM Album
+                            Tag::add('artist', $artist_id[$joinorder], $tag, false);   // X Artisten verursachen X Songs
+                            //Tag::add('artist', $artist_id, $tag, false);   // X Artisten verursachen X Songs
+                        }
+                    }
+                }
+
+                $tmp_joinorder = ($joinorder == 0) ? NULL : (int)$joinorder;
+                // REMOVE_ME add the new fields joinphrase and joinorder joinorder is simply the loopcounter
+                $sql = 'INSERT INTO `song_data` (`song_id`, `joinphrase`, `joinorder`, `comment`, `lyrics`, `label`, `language`, `replaygain_track_gain`, `replaygain_track_peak`, `replaygain_album_gain`, `replaygain_album_peak`, `r128_track_gain`, `r128_album_gain`) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+                Dba::write($sql, array($song_id[$joinorder], $joinphrase[$joinorder], $tmp_joinorder, $comment, $lyrics, $label, $language, $replaygain_track_gain, $replaygain_track_peak, $replaygain_album_gain, $replaygain_album_peak, $r128_track_gain, $r128_album_gain));
+            }
+            // end loop over artists to add song for
+        }
+        // end loop over albumartists,  return with array of song_id's
 
         return $song_id;
     }

@@ -93,6 +93,16 @@ class Artist extends database_object implements library_item, GarbageCollectible
     public $mbid; // MusicBrainz ID
 
     /**
+     * @var integer $primary
+     */
+    public $primary;
+
+    /**
+     * @var integer $aliasof
+     */
+    public $aliasof;
+
+    /**
      * @var integer $catalog_id
      */
     public $catalog_id;
@@ -715,29 +725,36 @@ class Artist extends database_object implements library_item, GarbageCollectible
      * Checks for an existing artist; if none exists, insert one.
      * @param string $name
      * @param string $mbid
+     * @param boolean $primary
+     * @param string $artistname
      * @param boolean $readonly
      * @return integer|null
      */
-    public static function check($name, $mbid = '', $readonly = false)
+    public static function check($name, $mbid = '', $primary = null, $readonly = false)
     {
         $trimmed = Catalog::trim_prefix(trim((string)$name));
         $name    = $trimmed['string'];
         $prefix  = $trimmed['prefix'];
-        // If Ampache support multiple artists per song one day, we should also handle other artists here
-        $trimmed = Catalog::trim_featuring($name);
-        $name    = $trimmed[0];
+        //$mbid    = (string)$mbid;
+        // REMOVE_ME If Ampache support multiple artists per song one day, we should also handle other artists here
+        // not used anymore due to alias support and joinphrase
+        //$trimmed = Catalog::trim_featuring($name);
+        //$name    = $trimmed[0];
 
-        // If Ampache support multiple artists per song one day, we should also handle other artists here
-        $mbid = Catalog::trim_slashed_list($mbid);
-
+        // REMOVE_ME If Ampache support multiple artists per song one day, we should also handle other artists here
+        // $mbid = Catalog::trim_slashed_list($mbid);
+        //debug_event('Artist::check', ' Check for mb_artistid : ' . var_export($mbid, true), 5);
+        
         if (!$name) {
             $name   = T_('Unknown (Orphaned)');
             $prefix = null;
         }
+        // REMOVE_ME don't remove mbid, MBID for 'Various Artists' = 89ad4ac3-39f7-470e-963a-56509c546377
         if ($name == 'Various Artists') {
-            $mbid = '';
+            $mbid = ($mbid == '89ad4ac3-39f7-470e-963a-56509c546377') ? $mbid : '89ad4ac3-39f7-470e-963a-56509c546377';
         }
 
+        // REMOVE_ME Artist already added during run and is mapped in the cache, so return the id mapped in the cache and return
         if (isset(self::$_mapcache[$name][$prefix][$mbid])) {
             return self::$_mapcache[$name][$prefix][$mbid];
         }
@@ -820,11 +837,21 @@ class Artist extends database_object implements library_item, GarbageCollectible
 
             return (int)$artist_id;
         }
+        // REMOVE_ME
+        // artist is new add it to the db and do add $primary, for albumartists joinphrase and joinorder is needed
         // if all else fails, insert a new artist, cache it and return the id
-        $sql  = 'INSERT INTO `artist` (`name`, `prefix`, `mbid`) ' . 'VALUES(?, ?, ?)';
-        $mbid = (!empty($matches)) ? $matches[0] : $mbid; // TODO only use primary mbid until multi-artist is ready
+        // $sql = 'INSERT INTO `artist` (`name`, `prefix`, `mbid`) ' . 'VALUES(?, ?, ?)';
+        // $mbid = (!empty($matches)) ? $matches[0] : $mbid; // TODO only use primary mbid until multi-artist is ready
+        $sql = 'INSERT INTO `artist` (`name`, `prefix`, `mbid`, `primary`) ' . 'VALUES(?, ?, ?, ?)';
 
-        $db_results = Dba::write($sql, array($name, $prefix, $mbid));
+        // REMOVE_ME to be able to write null to field primary
+        $tmpPrimary = (is_null($primary)) ? NULL : (int)$primary;
+        $db_array = 'array(' . $name . ',' . $prefix . ',' . $mbid . ',' . $tmpPrimary . ')';
+        //debug_event(self::class, ' db_array : ' . var_export($db_array, true), 5);
+        // REMOVE_ME check primary to see what happens / goes wrong
+        debug_event('Artist::check', 'Start DB add Action - for Artist : ' . var_export($name, true) . ' primary is : ' . var_export($tmpPrimary, true), 5);
+
+        $db_results = Dba::write($sql, array($name, $prefix, $mbid, $tmpPrimary));
         if (!$db_results) {
             return null;
         }
@@ -850,6 +877,7 @@ class Artist extends database_object implements library_item, GarbageCollectible
         // Save our current ID
         $name        = isset($data['name']) ? $data['name'] : $this->name;
         $mbid        = isset($data['mbid']) ? $data['mbid'] : $this->mbid;
+        $primary     = isset($data['primary']) ? $data['primary'] : $this->primary;
         $summary     = isset($data['summary']) ? $data['summary'] : $this->summary;
         $placeformed = isset($data['placeformed']) ? $data['placeformed'] : $this->placeformed;
         $yearformed  = isset($data['yearformed']) ? $data['yearformed'] : $this->yearformed;
@@ -859,7 +887,7 @@ class Artist extends database_object implements library_item, GarbageCollectible
         // Check if name is different than current name
         if ($this->name != $name) {
             $updated   = false;
-            $artist_id = self::check($name, $mbid, true);
+            $artist_id = self::check($name, $mbid, $primary, true);
 
             // If it's changed we need to update
             if ($artist_id !== null && $artist_id !== $this->id) {

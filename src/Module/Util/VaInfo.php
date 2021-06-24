@@ -48,6 +48,7 @@ final class VaInfo implements VaInfoInterface
     public $type          = '';
     public $tags          = array();
     public $gatherTypes   = array();
+    public $maEnabled     = '';
     public $islocal;
 
     protected $_raw           = array();
@@ -100,6 +101,7 @@ final class VaInfo implements VaInfoInterface
         $this->filename    = $file;
         $this->gatherTypes = $gatherTypes;
         $this->encoding    = $encoding ?: $configContainer->get(ConfigurationKeyEnum::SITE_CHARSET);
+        $this->maEnabled   = false;
 
         /* These are needed for the filename mojo */
         $this->_file_pattern = $filePattern;
@@ -285,7 +287,7 @@ final class VaInfo implements VaInfoInterface
             $this->tags['getid3'] = $this->_get_tags();
         }
 
-        $this->_get_plugin_tags();
+        $this->_get_plugin_tags($enabled_sources);
     } // get_info
 
     /**
@@ -443,6 +445,9 @@ final class VaInfo implements VaInfoInterface
         foreach ($order as $key) {
             if ($results[$key]) {
                 $returned_keys[] = $key;
+                // REMOVE_ME only for testing remove when done
+                //debug_event(self::class, 'Key processed: ' . var_export($key, true), 5);
+                //debug_event(self::class, 'Returned_Keys: ' . var_export($returned_keys, true), 5);
             }
         }
 
@@ -480,8 +485,13 @@ final class VaInfo implements VaInfoInterface
         $info['file'] = $filename;
 
         // Iteration!
+        // REMOVE_ME
+        //debug_event('Clean_Tag_Info - Start of Loop', 'processing tags for: ' . var_export($keys, true), 5);
         foreach ($keys as $key) {
-            $tags = $results[$key];
+            $tags        = $results[$key];
+            $tags['key'] = $key;
+            // REMOVE_ME only for testing remove when done
+            //debug_event('clean_tag_info', 'processing tags from: ' . var_export($key, true), 5);
 
             $info['file']    = $info['file'] ?: $tags['file'];
             $info['bitrate'] = $info['bitrate'] ?: (int) $tags['bitrate'];
@@ -505,29 +515,54 @@ final class VaInfo implements VaInfoInterface
             $info['totaldisks'] = $info['totaldisks'] ?: (int) $tags['totaldisks'];
 
             $info['artist']      = $info['artist'] ?: trim((string)$tags['artist']);
-            $info['albumartist'] = $info['albumartist'] ?: trim((string)$tags['albumartist']);
+            // REMOVE_ME for multi-artist treat albumartist as array as it might be one
+            $info['albumartist'] = self::clean_array_tag('albumartist', $info, $tags);
+            //debug_event('clean_tag_info', 'AlbumArtist : ' . var_export($info['albumartist'], true), 5);
+            //$info['albumartist'] = $info['albumartist'] ?: trim((string)$tags['albumartist']);
 
             $info['album'] = $info['album'] ?: trim((string)$tags['album']);
 
-            $info['band']      = $info['band'] ?: trim((string)$tags['band']);
+            // REMOVE_ME for multi-artist band is the same as albumartist so treat band as array as it might be one
+            $info['band']      = self::clean_array_tag('band', $info, $tags);
+            //debug_event('clean_tag_info', 'AlbumArtist band : ' . var_export($info['band'], true), 5);
+            //$info['band']      = $info['band'] ?: trim((string)$tags['band']);
             $info['composer']  = $info['composer'] ?: trim((string)$tags['composer']);
             $info['publisher'] = $info['publisher'] ?: trim((string)$tags['publisher']);
 
             $info['genre'] = self::clean_array_tag('genre', $info, $tags);
 
             $info['mb_trackid']       = $info['mb_trackid'] ?: trim((string)$tags['mb_trackid']);
+            $info['isrc']             = $info['isrc'] ?: trim((string)$tags['isrc']);
             $info['mb_albumid']       = $info['mb_albumid'] ?: trim((string)$tags['mb_albumid']);
             $info['mb_albumid_group'] = $info['mb_albumid_group'] ?: trim((string)$tags['mb_albumid_group']);
-            $info['mb_artistid']      = $info['mb_artistid'] ?: trim((string)$tags['mb_artistid']);
-            $info['mb_albumartistid'] = $info['mb_albumartistid'] ?: trim((string)$tags['mb_albumartistid']);
+            // REMOVE_ME for testing mb_artistid is array treat as one
+            //debug_event('Clean_Tag_Info', 'Processing Key: ' . $key, 5);
+            //debug_event('Clean_Tag_Info', 'MB_Artist-Id before: ' . var_export($tags['mb_artistid'], true), 5);
+            $info['mb_artistid'] = self::clean_array_tag('mb_artistid', $info, $tags);
+            //debug_event('Clean_Tag_Info', 'MB_Artist-Id after : ' . var_export($info['mb_artistid'], true), 5);
+            // $info['mb_artistid']      = $info['mb_artistid'] ?: trim((string)$tags['mb_artistid']);
+            // REMOVE_ME mb_albumartistid also handled as array, but there is no good tag to split for the albumartist's names
+            // maybe split by &,/,feat., ...
+            $info['mb_albumartistid'] = self::clean_array_tag('mb_albumartistid', $info, $tags);
+            // $info['mb_albumartistid'] = $info['mb_albumartistid'] ?: trim((string)$tags['mb_albumartistid']);
             if (trim((string)$tags['release_type']) !== '') {
                 $info['release_type'] = $info['release_type'] ?: trim((string)$tags['release_type']);
             }
             if (trim((string)$tags['release_status']) !== '') {
                 $info['release_status'] = $info['release_status'] ?: trim((string)$tags['release_status']);
             }
-            // artists is an array treat it as one
+            // REMOVE_ME artists is an array treat it as one
+            //debug_event('Clean_Tag_Info', 'Artists before: ' . var_export($tags['artists'], true), 5);
             $info['artists'] = self::clean_array_tag('artists', $info, $tags);
+            //debug_event('Clean_Tag_Info', 'Artists after : ' . var_export($info['artists'], true), 5);
+            // REMOVE_ME add joinphrase for joining of song artist names
+            $info['joinphrase'] = self::clean_array_tag('joinphrase', $info, $tags);
+            // REMOVE_ME add primary to distinct between artist and pseudonym
+            //debug_event('Clean_Tag_Info', 'Primary before: ' . var_export($tags['primary'], true), 5);
+            $info['primary']    = isset($info['primary']) ? $info['primary'] : (!is_null($tags['primary']) ? (bool)$tags['primary'] : null);
+            // REMOVE_ME add aa_joinphrase for joining of albumartist names
+            //debug_event('Clean_Tag_Info', 'Primary after : ' . var_export($info['primary'], true), 5);
+            $info['aa_joinphrase'] = self::clean_array_tag('aa_joinphrase', $info, $tags);
 
             $info['original_year']  = $info['original_year'] ?: trim((string)$tags['original_year']);
             $info['barcode']        = $info['barcode'] ?: trim((string)$tags['barcode']);
@@ -540,6 +575,7 @@ final class VaInfo implements VaInfoInterface
                 ?: strip_tags(nl2br((string) $tags['lyrics']), "<br>");
 
             // extended checks to make sure "0" makes it through, which would otherwise eval to false
+            //debug_event(self::class, 'id3v2 replaygain_track_gain: ' . var_export($tags['replaygain_track_gain'], true), 5);
             $info['replaygain_track_gain'] = isset($info['replaygain_track_gain']) ? $info['replaygain_track_gain'] : (!is_null($tags['replaygain_track_gain']) ? (float) $tags['replaygain_track_gain'] : null);
             $info['replaygain_track_peak'] = isset($info['replaygain_track_peak']) ? $info['replaygain_track_peak'] : (!is_null($tags['replaygain_track_peak']) ? (float) $tags['replaygain_track_peak'] : null);
             $info['replaygain_album_gain'] = isset($info['replaygain_album_gain']) ? $info['replaygain_album_gain'] : (!is_null($tags['replaygain_album_gain']) ? (float) $tags['replaygain_album_gain'] : null);
@@ -548,6 +584,7 @@ final class VaInfo implements VaInfoInterface
             $info['r128_album_gain']       = isset($info['r128_album_gain']) ? $info['r128_album_gain'] : (!is_null($tags['r128_album_gain']) ? (int) $tags['r128_album_gain'] : null);
 
             $info['track']         = $info['track'] ?: (int) $tags['track'];
+            $info['totaltracks']   = $info['totaltracks'] ?: (int) $tags['totaltracks'];
             $info['resolution_x']  = $info['resolution_x'] ?: (int) $tags['resolution_x'];
             $info['resolution_y']  = $info['resolution_y'] ?: (int) $tags['resolution_y'];
             $info['display_x']     = $info['display_x'] ?: (int) $tags['display_x'];
@@ -573,7 +610,8 @@ final class VaInfo implements VaInfoInterface
             if (static::getConfigContainer()->get(ConfigurationKeyEnum::ENABLE_CUSTOM_METADATA) && is_array($tags)) {
                 // Add rest of the tags without typecast to the array
                 foreach ($tags as $tag => $value) {
-                    if (!array_key_exists($tag, $info) && !is_array($value)) {
+                    // REMOVE_ME to be sure it does not make it trough from elsewhere exclude tag 'music_cd_identifier' here also
+                    if (!array_key_exists($tag, $info) && !is_array($value) && ($tag != 'music_cd_identifier')) {
                         $info[$tag] = trim((string)$value);
                     }
                 }
@@ -601,22 +639,41 @@ final class VaInfo implements VaInfoInterface
      */
     private static function clean_array_tag($field, $info, $tags)
     {
+        $maEnabled = false;
         $arr = array();
-        if ((!$info[$field] || count($info[$field]) == 0) && $tags[$field]) {
+        //debug_event('Clean_Array_Tag', 'Tag : ' . $field . ' Info-Tag : ' . var_export($info[$field], true) . ' Tags-Tag : ' . var_export($tags[$field], true), 5);
+        $cinfo = is_null($info[$field]) ? 0 : (is_countable($info[$field]) ? count($info[$field]) : 1);
+        $ctags = is_null($tags[$field]) ? 0 : (is_countable($tags[$field]) ? count($tags[$field]) : 1);
+        //if ((!$info[$field] || count($info[$field]) == 0) && $tags[$field]) {
+        // ensure tags make it through if they are more 'complete'
+        if ((!$info[$field] || $cinfo == 0 || $cinfo < $ctags) && $tags[$field]) {
             if (!is_array($tags[$field])) {
                 // not all tag formats will return an array, but we need one
                 $arr[] = trim((string)$tags[$field]);
             } else {
-                // not only used for genre might otherwise be misleading
                 foreach ($tags[$field] as $data) {
                     $arr[] = trim((string)$data);
+                    //debug_event('VaInfo.clean_array_tag', ' for field :' . $field, 5);
+                    //debug_event('VaInfo.clean_array_tag', ' arr[] :' . var_export($arr,true), 5);
                 }
             }
         } else {
+            // add solution to give musicbrainz tags precedence if they aren't empty (genres for now are problematic for example)
             $arr = $info[$field];
+            // keine gute idee, genres werden dadurch wegoptimiert
+            // ensure that tags from musicbrainz make it through
+            // $arr = ($tags['key'] == 'musicbrainz') ? $tags[$field] : $info[$field];
         }
 
-        return $arr;
+        if ($field == 'genre') {
+            // for genre return always an array
+            return $arr;
+        } elseif ($maEnabled) {
+            // if multiartist is enabled return array too
+            return $arr;
+        } else {
+            return is_array($arr) ? $arr[0] : $arr;
+        }
     }
 
     /**
@@ -626,7 +683,9 @@ final class VaInfo implements VaInfoInterface
      */
     public static function get_mbid_array($mbid)
     {
-        $mbid_match_string = '/[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9]-[a-z0-9][a-z0-9][a-z0-9][a-z0-9]-[a-z0-9][a-z0-9][a-z0-9][a-z0-9]-[a-z0-9][a-z0-9][a-z0-9][a-z0-9]-[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9]/';
+        //$mbid_match_string = '/[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9]-[a-z0-9][a-z0-9][a-z0-9][a-z0-9]-[a-z0-9][a-z0-9][a-z0-9][a-z0-9]-[a-z0-9][a-z0-9][a-z0-9][a-z0-9]-[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9]/';
+        // improved computation time only needs 20 steps instead of 74 to split UUID's
+        $mbid_match_string = '/[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}/';
         if (preg_match($mbid_match_string, $mbid, $matches)) {
             return $matches;
         }
@@ -806,9 +865,9 @@ final class VaInfo implements VaInfoInterface
      *
      * Get additional metadata from plugins
      */
-    private function _get_plugin_tags()
+    private function _get_plugin_tags($tag_order)
     {
-        $tag_order    = $this->get_metadata_order();
+        //$tag_order    = $this->get_metadata_order();  // not needed as calling with tag_order
         $plugin_names = Plugin::get_plugins('get_metadata');
         // don't loop over getid3 and filename
         $tag_order    = array_diff($tag_order, array('getid3','filename'));
@@ -818,10 +877,13 @@ final class VaInfo implements VaInfoInterface
                 $installed_version = Plugin::get_plugin_version($plugin->_plugin->name);
                 if ($installed_version) {
                     if ($plugin->load(Core::get_global('user'))) {
-                        $this->tags[$tag_source] = $plugin->_plugin->get_metadata($this->gatherTypes,
-                            self::clean_tag_info($this->tags,
-                                self::get_tag_type($this->tags, $this->get_metadata_order_key()), $this->filename));
-                    }
+                        // REMOVE_ME don't call clean_tag_info after each plugin, VaInfo always is called by clean_tag_info from everywhere
+                        debug_event('_get_plugin_tags ', ' Get tagdata from Plugin : ' . $tag_source, 5);
+                        $this->tags[$tag_source] = $plugin->_plugin->get_metadata($this->gatherTypes, $this->tags['getid3']);
+                        //$this->tags[$tag_source] = $plugin->_plugin->get_metadata($this->gatherTypes,
+                        //    self::clean_tag_info($this->tags,
+                        //        self::get_tag_type($this->tags, $this->get_metadata_order_key()), $this->filename));
+                        }
                 }
             } elseif (!in_array($tag_source, array('filename', 'getid3'))) {
                 $this->logger->debug(
@@ -829,6 +891,8 @@ final class VaInfo implements VaInfoInterface
                     [LegacyLogger::CONTEXT_TYPE => __CLASS__]
                 );
             }
+            // REMOVE_ME only for testing remove when done
+            //debug_event('Get_Plugin_Tags', 'Tags retrieved for ' . $tag_source . ' : ' . var_export($this->tags[$tag_source], true), 5);
         }
     }
 
@@ -888,6 +952,10 @@ final class VaInfo implements VaInfoInterface
                 }
             }
         }
+
+        // REMOVE_ME
+        //debug_event('VaInfo::parse_general', 'Tags : ', 5);
+        //debug_event('VaInfo::parse_general', var_export($parsed, true), 5);
 
         return $parsed;
     }
@@ -962,13 +1030,15 @@ final class VaInfo implements VaInfoInterface
                     $parsed['track'] = $data[0];
                     break;
                 case 'musicbrainz_artistid':
-                    $parsed['mb_artistid'] = $data[0];
+                    $parsed['mb_artistid'] = $data; // MA deliver the array instead only the first item
+                    //$parsed['mb_artistid'] = $data[0];
                     break;
                 case 'musicbrainz_albumid':
                     $parsed['mb_albumid'] = $data[0];
                     break;
                 case 'musicbrainz_albumartistid':
-                    $parsed['mb_albumartistid'] = $data[0];
+                    $parsed['mb_albumartistid'] = $data; // MA deliver the array instead only the first item
+                    //$parsed['mb_albumartistid'] = $data[0];
                     break;
                 case 'musicbrainz_releasegroupid':
                     $parsed['mb_albumid_group'] = $data[0];
@@ -979,6 +1049,13 @@ final class VaInfo implements VaInfoInterface
                 case 'musicbrainz_albumtype':
                     $parsed['release_type'] = (is_array($data[0])) ? implode(", ", $data[0]) : implode(', ',
                         array_diff(preg_split("/[^a-zA-Z0-9*]/", $data[0]), array('')));
+                    // REMOVE_ME
+                    //debug_event('VaInfo', 'Releasetype  generic : ' . var_export($parsed['release_type'], true), 5);
+                    //debug_event('VaInfo', 'Releasetype original : ' . var_export($data, true), 5);
+                    break;
+                case 'music_cd_identifier':
+                    // REMOVE_ME get rid of this annoying tag causing only problems, uncomment to have it as empty tag in the results
+                    // $parsed['music_cd_identifier'] = '';
                     break;
                 case 'musicbrainz_albumstatus':
                     $parsed['release_status'] = (is_array($data[0])) ? implode(", ", $data[0]) : implode(', ',
@@ -989,7 +1066,9 @@ final class VaInfo implements VaInfoInterface
                     break;
             }
         }
-
+        // REMOVE_ME
+        //debug_event('VaInfo::cleanup_generic', 'Tags : ', 5);
+        //debug_event('VaInfo::cleanup_generic', var_export($parsed, true), 5);
         return $parsed;
     }
 
@@ -1029,6 +1108,9 @@ final class VaInfo implements VaInfoInterface
         foreach ($tags as $tag => $data) {
             //debug_event(self::class, 'Vorbis tag: ' . $tag . ' value: ' . $data[0], 5);
             switch (strtolower($tag)) {
+                case 'artists':
+                    $parsed[$tag] = $data; // MA deliver the array instead only first item
+                    break;
                 case 'genre':
                     // Pass the array through
                     $parsed[$tag] = $this->parseGenres($data);
@@ -1037,22 +1119,36 @@ final class VaInfo implements VaInfoInterface
                 case 'track_number':
                     $parsed['track'] = $data[0];
                     break;
+                case 'tracktotal':
+                    $parsed['totaltracks'] = $data[0];
+                    break;
                 case 'discnumber':
-                    $elements             = explode('/', $data[0]);
-                    $parsed['disk']       = $elements[0];
-                    $parsed['totaldisks'] = $elements[1];
+                    //$elements             = explode('/', $data[0]);
+                    //$parsed['disk']       = $elements[0];
+                    //$parsed['totaldisks'] = $elements[1];
+                    $parsed['disk']       = $data[0];
+                    break;
+                // REMOVE_ME add second possible option totaldiscs
+                case 'totaldiscs':
+                case 'disctotal':
+                    $parsed['totaldisks'] = $data[0];
+                    break;
+                case 'isrc':
+                    $parsed['isrc'] = $data[0];
                     break;
                 case 'date':
                     $parsed['year'] = $data[0];
                     break;
                 case 'musicbrainz_artistid':
-                    $parsed['mb_artistid'] = $data[0];
+                    $parsed['mb_artistid'] = $data; // MA deliver the array instead only first item
+                    //$parsed['mb_artistid'] = $data[0];
                     break;
                 case 'musicbrainz_albumid':
                     $parsed['mb_albumid'] = $data[0];
                     break;
                 case 'musicbrainz_albumartistid':
-                    $parsed['mb_albumartistid'] = $data[0];
+                    $parsed['mb_albumartistid'] = $data; // MA deliver the array instead only the first item
+                    //$parsed['mb_albumartistid'] = $data[0];
                     break;
                 case 'musicbrainz_releasegroupid':
                     $parsed['mb_albumid_group'] = $data[0];
@@ -1062,8 +1158,9 @@ final class VaInfo implements VaInfoInterface
                     break;
                 case 'releasetype':
                 case 'musicbrainz_albumtype':
-                    $parsed['release_type'] = (is_array($data[0])) ? implode(", ", $data[0]) : implode(', ',
-                        array_diff(preg_split("/[^a-zA-Z0-9*]/", $data[0]), array('')));
+                    // REMOVE_ME process the array not only the first element
+                    $parsed['release_type'] = (is_array($data)) ? implode(", ", $data) : implode(', ',
+                        array_diff(preg_split("/[^a-zA-Z0-9*]/", $data), array('')));
                     break;
                 case 'releasestatus':
                 case 'musicbrainz_albumstatus':
@@ -1122,6 +1219,9 @@ final class VaInfo implements VaInfoInterface
                 $parsed['replaygain_album_peak'] = (float) $this->_raw['replay_gain']['album']['peak'];
             }
         }
+        // REMOVE_ME
+        //debug_event('VaInfo::cleanup_vorbiscomment', 'Tags : ', 5);
+        //debug_event('VaInfo::cleanup_vorbiscomment', var_export($parsed, true), 5);
 
         return $parsed;
     }
@@ -1156,6 +1256,8 @@ final class VaInfo implements VaInfoInterface
      */
     private function _cleanup_id3v2($tags)
     {
+        //$maEnabled = $this->configContainer->get(ConfigurationKeyEnum::ENABLE_MULTIARTIST);
+        //$maEnabled = !$maEnabled;
         $parsed = array();
 
         foreach ($tags as $tag => $data) {
@@ -1171,6 +1273,12 @@ final class VaInfo implements VaInfoInterface
                     break;
                 case 'track_number':
                     $parsed['track'] = $data[0];
+                    break;
+                case 'totaltracks':
+                    $parsed['totaltracks'] = $data[0];
+                    break;
+                case 'isrc':
+                    $parsed['isrc'] = $data[0];
                     break;
                 case 'comment':
                     // First array key can be xFF\xFE in case of UTF-8, better to get it this way
@@ -1211,6 +1319,10 @@ final class VaInfo implements VaInfoInterface
                 case 'label':
                     $parsed['publisher'] = $data[0];
                     break;
+                case 'music_cd_identifier':
+                    // REMOVE_ME get rid of this annoying tag causing only problems, uncomment to have it as empty tag in the results
+                    //$parsed['music_cd_identifier'] = $data[0]
+                    break;
                 default:
                     $parsed[$tag] = $data[0];
                     break;
@@ -1249,10 +1361,14 @@ final class VaInfo implements VaInfoInterface
                         $parsed['mb_albumid_group'] = $id3v2['comments']['text'][$txxx['description']];
                         break;
                     case 'musicbrainz artist id':
-                        $parsed['mb_artistid'] = $id3v2['comments']['text'][$txxx['description']];
+                        // REMOVE_ME split mb_artistid to have an array for multi_artist, control splitting by $maEnabled instead true/false
+                        $parsed['mb_artistid'] = $this->splitSlashedlist($id3v2['comments']['text'][$txxx['description']], false);  // true = only first element of array until multi-artist is ready
+                        //$parsed['mb_artistid'] = $id3v2['comments']['text'][$txxx['description']];
                         break;
                     case 'musicbrainz album artist id':
-                        $parsed['mb_albumartistid'] = $id3v2['comments']['text'][$txxx['description']];
+                        // REMOVE_ME split mb_albumartistid to have an array for multi_artist, control splitting by $maEnabled instead true/false
+                        $parsed['mb_albumartistid'] = $this->splitSlashedlist($id3v2['comments']['text'][$txxx['description']], false); // true = only first element of array until multi-artist is ready
+                        //$parsed['mb_albumartistid'] = $id3v2['comments']['text'][$txxx['description']];
                         break;
                     case 'musicbrainz album type':
                         $parsed['release_type'] = (is_array($id3v2['comments']['text'][$txxx['description']])) ? implode(", ",
@@ -1266,16 +1382,20 @@ final class VaInfo implements VaInfoInterface
                     // FIXME: shouldn't here $txxx['data'] be replaced by $id3v2['comments']['text'][$txxx['description']]
                     // all replaygain values aren't always correctly retrieved
                     case 'replaygain_track_gain':
-                        $parsed['replaygain_track_gain'] = (float) $txxx['data'];
+                        //$parsed['replaygain_track_gain'] = (float) $txxx['data'];
+                        $parsed['replaygain_track_gain'] = (float) $id3v2['comments']['text'][$txxx['description']];
                         break;
                     case 'replaygain_track_peak':
-                        $parsed['replaygain_track_peak'] = (float) $txxx['data'];
+                        //$parsed['replaygain_track_peak'] = (float) $txxx['data'];
+                        $parsed['replaygain_track_peak'] = (float) $id3v2['comments']['text'][$txxx['description']];
                         break;
                     case 'replaygain_album_gain':
-                        $parsed['replaygain_album_gain'] = (float) $txxx['data'];
+                        //$parsed['replaygain_album_gain'] = (float) $txxx['data'];
+                        $parsed['replaygain_album_gain'] = (float) $id3v2['comments']['text'][$txxx['description']];
                         break;
                     case 'replaygain_album_peak':
-                        $parsed['replaygain_album_peak'] = (float) $txxx['data'];
+                        //$parsed['replaygain_album_peak'] = (float) $txxx['data'];
+                        $parsed['replaygain_album_peak'] = (float) $id3v2['comments']['text'][$txxx['description']];
                         break;
                     case 'r128_track_gain':
                         $parsed['r128_track_gain'] = (int) $txxx['data'];
@@ -1296,8 +1416,9 @@ final class VaInfo implements VaInfoInterface
                         $parsed['publisher'] = $id3v2['comments']['text'][$txxx['description']];
                         break;
                     default:
-                        if ($enable_custom_metadata && !in_array($txxx['description'], $parsed)) {
-                            $parsed[$txxx['description']] = $id3v2['comments']['text'][$txxx['description']];
+                        // tags are always lowercase then they should be here also
+                        if ($enable_custom_metadata && !in_array(strtolower($this->trimAscii($txxx['description'])), $parsed)) {
+                            $parsed[strtolower($this->trimAscii($txxx['description']))] = $id3v2['comments']['text'][$txxx['description']];
                         }
                         break;
                 }
@@ -1325,6 +1446,9 @@ final class VaInfo implements VaInfoInterface
                 $parsed['rating'][$rating_user] = $popm['rating'] / 255 * 5;
             }
         }
+        // REMOVE_ME
+        //debug_event('VaInfo::cleanup_id3v2', 'Tags : ', 5);
+        //debug_event('VaInfo::cleanup_id3v2', var_export($parsed, true), 5);
 
         return $parsed;
     }
@@ -1343,11 +1467,20 @@ final class VaInfo implements VaInfoInterface
                 case 'product':
                     $parsed['album'] = $data[0];
                     break;
+                case 'text':
+                    if (!empty($data['ARTISTS'])) {
+                        $parsed['artists'] = $this->splitSlashedlist($data['ARTISTS'], false);
+                    }
+                    break;
                 default:
-                    $parsed[$tag] = $data[0];
+                    // tags are always lower case
+                    $parsed[strtolower($tag)] = $data[0];
                     break;
             }
         }
+        // REMOVE_ME
+        //debug_event('VaInfo::cleanup_riff', 'Tags : ', 5);
+        //debug_event('VaInfo::cleanup_riff', var_export($parsed, true), 5);
 
         return $parsed;
     }
@@ -1378,13 +1511,15 @@ final class VaInfo implements VaInfoInterface
                     $parsed['mb_albumid'] = $data[0];
                     break;
                 case 'musicbrainz album artist id':
-                    $parsed['mb_albumartistid'] = $data[0];
+                    $parsed['mb_albumartistid'] = $data; // MA deliver the array instead only first item
+                    //$parsed['mb_albumartistid'] = $data[0];
                     break;
                 case 'musicbrainz release group id':
                     $parsed['mb_albumid_group'] = $data[0];
                     break;
                 case 'musicbrainz artist id':
-                    $parsed['mb_artistid'] = $data[0];
+                    $parsed['mb_artistid'] = $data; // MA deliver the array instead only first item
+                    //$parsed['mb_artistid'] = $data[0];
                     break;
                 case 'musicbrainz album type':
                     $parsed['release_type'] = (is_array($data[0])) ? implode(", ", $data[0]) : implode(', ',
@@ -1394,13 +1529,22 @@ final class VaInfo implements VaInfoInterface
                     $parsed['release_status'] = $data[0];
                     break;
                 case 'track_number':
-                    $parsed['track'] = $data[0];
+                    $elements              = explode('/', $data[0]);
+                    $parsed['track']       = $elements[0];
+                    $parsed['totaltracks'] = $elements[1];
                     break;
                 case 'disc_number':
-                    $parsed['disk'] = $data[0];
+                    $elements             = explode('/', $data[0]);
+                    $parsed['disk']       = $elements[0];
+                    $parsed['totaldisks'] = $elements[1];
+                    //$parsed['disk'] = $data[0];
+                    break;
+                case 'isrc':
+                    $parsed['isrc'] = $data[0];
                     break;
                 case 'album_artist':
-                    $parsed['albumartist'] = $data[0];
+                    $parsed['albumartist'] = $data; // MA deliver the array instead only first item
+                    //$parsed['albumartist'] = $data[0];
                     break;
                 case 'creation_date':
                 case 'originaldate':
@@ -1432,10 +1576,14 @@ final class VaInfo implements VaInfoInterface
                     $parsed['tvshow'] = $data[0];
                     break;
                 default:
-                    $parsed[$tag] = $data[0];
+                    // tags are always lower case
+                    $parsed[strtolower($tag)] = $data[0];
                     break;
             }
         }
+        // REMOVE_ME
+        //debug_event('VaInfo::cleanup_quicktime', 'Tags : ', 5);
+        //debug_event('VaInfo::cleanup_quicktime', var_export($parsed, true), 5);
 
         return $parsed;
     }

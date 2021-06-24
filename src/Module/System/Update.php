@@ -251,6 +251,9 @@ class Update
         $update_string = "* Add filter_user to catalog table<br />* Set a unique key on user_data";
         $version[]     = array('version' => '500008', 'description' => $update_string);
 
+        $update_string = "**IMPORTANT UPDATE NOTES**<br />Preparing database for multi-artist feature.<br />For multi-artist feature to become active also config option 'enable_multiartist = true' needs to be set !<br />For the moment only recommended for new created catalogs. Yet there is no migration functionality for existing catalogs !<br /><br />" . "* Add 'primary' and 'aliasof' to artist. (For identification of artist aliases)<br />" . "* Add 'joinphrase' and 'joinorder' to song_data. <br />";
+        $version[]     = array('version' => '500009', 'description' => $update_string);
+
         return $version;
     }
 
@@ -1409,6 +1412,27 @@ class Update
             $retval &= Dba::write($sql);
         }
         $sql    = "ALTER TABLE `user_data` ADD UNIQUE `unique_data` (`user`,`key`);";
+        $retval &= Dba::write($sql);
+
+        return $retval;
+    }
+
+    /**
+     * update_500008
+     *
+     * Add primary to artist
+     * Add joinphrase and joinorder to song_data
+     */
+    public static function update_500009()
+    {
+        $retval = true;
+        $sql    = "ALTER TABLE `artist` ADD `primary` tinyint(1) unsigned DEFAULT NULL NULL AFTER `mbid`;";
+        $retval &= Dba::write($sql);
+        $sql    = "ALTER TABLE `artist` ADD `aliasof` int(11) unsigned DEFAULT NULL NULL AFTER `primary`;";
+        $retval &= Dba::write($sql);
+        $sql    = "ALTER TABLE `song_data` ADD `joinphrase` varchar(10)  DEFAULT NULL NULL AFTER `song_id`;";
+        $retval &= Dba::write($sql);
+        $sql    = "ALTER TABLE `song_data` ADD `joinorder` tinyint(2) unsigned DEFAULT 0 NULL AFTER `joinphrase`;";
         $retval &= Dba::write($sql);
 
         return $retval;

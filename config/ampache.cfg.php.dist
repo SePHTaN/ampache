@@ -331,6 +331,18 @@ catalog_prefix_pattern = "The|An|A|Die|Das|Ein|Eine|Les|Le|La"
 ; DEFAULT: "false"
 ;catalog_verify_by_time = "true"
 
+; Multi Artist
+; This determines if catalogs use the feature multi_artist
+; If enabled each song is stored for each individual artist to have a precise relationship song <-> artist
+; Also the joinphrase and the joinorder of artists for song is stored in song_data making trimming of feat. unnecessary
+; DEFAULT: "false"
+;enable_multiartist = "true"
+
+; Artist Aliases
+; This determines if catalogs use the feature artist_aliases/artist_pseudonyms aka same Artists with two different names
+; DEFAULT: "false"
+;enable_aliases = "true"
+
 ;#########################################################
 ; Program Settings                                       #
 ;#########################################################
@@ -671,6 +683,13 @@ art_order = "db,spotify,TheAudioDb,musicbrainz,lastfm,tags,folder"
 ; Older versions of the Kodi Add-on will require this for playlists to work
 ; DEFAULT: "false"
 ;hide_search = "true"
+
+; Group Artist Aliases
+; Set this to true to group aliases/pseudonyms with the 'primary' artist
+; If false : aliases are shown as individual artist 
+; If true  : aliases are grouped with primary artist, though displayed in artist/album-view with their alias name
+; DEFAULT: "false"
+;group_aliases = "true"
 
 ;#########################################################
 ;      API keys                                          #
